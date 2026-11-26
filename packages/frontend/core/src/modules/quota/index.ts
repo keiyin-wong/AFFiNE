@@ -1,6 +1,9 @@
 export { WorkspaceQuotaService } from './services/quota';
 export { QuotaCheck } from './views/quota-check';
 
+// The quota API uses the maximum signed 32-bit seat count for uncapped workspaces.
+export const UNLIMITED_WORKSPACE_MEMBERS = 2_147_483_647;
+
 import { type Framework } from '@toeverything/infra';
 
 import { NbstoreService } from '../storage';

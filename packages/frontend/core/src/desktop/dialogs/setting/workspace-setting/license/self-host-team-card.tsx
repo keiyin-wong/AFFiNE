@@ -8,7 +8,10 @@ import {
   WorkspaceSubscriptionService,
 } from '@affine/core/modules/cloud';
 import { WorkspacePermissionService } from '@affine/core/modules/permissions';
-import { WorkspaceQuotaService } from '@affine/core/modules/quota';
+import {
+  UNLIMITED_WORKSPACE_MEMBERS,
+  WorkspaceQuotaService,
+} from '@affine/core/modules/quota';
 import { UrlService } from '@affine/core/modules/url';
 import { WorkspaceService } from '@affine/core/modules/workspace';
 import { UserFriendlyError } from '@affine/error';
@@ -35,6 +38,8 @@ export const SelfHostTeamCard = () => {
   const permission = useService(WorkspacePermissionService).permission;
   const isTeam = useLiveData(permission.isTeam$);
   const workspaceQuota = useLiveData(workspaceQuotaService.quota.quota$);
+  const unlimitedMembers =
+    workspaceQuota?.memberLimit === UNLIMITED_WORKSPACE_MEMBERS;
   const confirmEnableCloud = useEnableCloud();
   const isLocalWorkspace = workspace.flavour === 'local';
 
@@ -91,12 +96,15 @@ export const SelfHostTeamCard = () => {
         </div>
       );
     }
+    if (unlimitedMembers) {
+      return t['com.affine.payment.member.team.description']();
+    }
     return t[
       'com.affine.settings.workspace.license.self-host-team.free.description'
     ]({
       memberCount: workspaceQuota?.humanReadable.memberLimit || '10',
     });
-  }, [isOneTimePurchase, isTeam, license, t, workspaceQuota]);
+  }, [isOneTimePurchase, isTeam, license, t, unlimitedMembers, workspaceQuota]);
   const handleClick = useCallback(() => {
     if (isLocalWorkspace) {
       confirmEnableCloud(workspace);
@@ -199,9 +207,11 @@ export const SelfHostTeamCard = () => {
               ]()}
             </span>
             <span>
-              {isTeam && !isOneTimePurchase
-                ? license?.quantity || ''
-                : `${workspaceQuota?.memberCount}/${workspaceQuota?.memberLimit}`}
+              {unlimitedMembers
+                ? workspaceQuota?.memberCount
+                : isTeam && !isOneTimePurchase
+                  ? license?.quantity || ''
+                  : `${workspaceQuota?.memberCount}/${workspaceQuota?.memberLimit}`}
             </span>
           </div>
         </div>

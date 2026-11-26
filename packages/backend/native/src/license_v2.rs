@@ -586,6 +586,11 @@ pub fn resolve_entitlements_with_v2(context: &AccessContext<'_>, facts: &[Entitl
     }
   }
 
+  // Seat counts use signed 32-bit integers across quota and invite APIs.
+  // Use their maximum to represent no plan-imposed limit for self-hosted free.
+  if best.plan == Plan::SelfHostedFree && best.limits.seat_limit > 0 {
+    best.limits.seat_limit = i32::MAX;
+  }
   best.diagnostics.extend(diagnostics);
   best
 }
@@ -598,7 +603,11 @@ fn parse_rfc3339(value: &str) -> Option<DateTime<Utc>> {
 
 #[cfg(test)]
 mod tests {
-  use affine_core::access_control::{TargetType, describe_plan};
+  use affine_core::access_control::{
+    QuotaUsage, SeatActivationFacts, SeatActivationRequest, SeatAuthority, SeatMutationIntent, SeatOperationPlan,
+    SeatReservationKind, SeatReviewFacts, SeatReviewRequest, TargetType, describe_plan, evaluate_workspace_quota,
+    plan_seat_activation, plan_seat_review_reservation, resolve_quota_subject,
+  };
   use p256::{
     ecdsa::{SigningKey, signature::Signer},
     pkcs8::DecodePrivateKey,
@@ -828,6 +837,71 @@ mod tests {
   }
 
   #[test]
+  fn selfhost_free_can_invite_and_activate_an_eleventh_workspace_member() {
+    let now = parse_rfc3339("2026-11-22T00:00:00Z").unwrap();
+    let resolve = |target_type| {
+      resolve_entitlements_with_v2(
+        &AccessContext {
+          deployment: CoreDeployment::SelfHosted,
+          target_type,
+          workspace_id: Some("ws-123"),
+          now,
+          license_public_key: None,
+        },
+        &[],
+      )
+    };
+    let workspace = resolve(TargetType::Workspace);
+    let owner = resolve(TargetType::User);
+    let grant = resolve_quota_subject(&workspace, &owner).grant;
+    let mut uncapped = default_selfhost_access_grant();
+    uncapped.limits.seat_limit = i32::MAX;
+    assert_eq!(grant, uncapped);
+
+    let SeatOperationPlan::Mutate(SeatMutationIntent::Reserve { status, kind, role, .. }) =
+      plan_seat_review_reservation(
+        SeatReviewRequest {
+          reservation: SeatReservationKind::EmailInvite,
+          requested_seats: 1,
+          collision: false,
+          authority_allowed: true,
+        },
+        SeatReviewFacts {
+          grant: grant.clone(),
+          usage: QuotaUsage {
+            storage_bytes: 0,
+            charged_seats: 10,
+          },
+        },
+      )
+    else {
+      panic!("the eleventh seat must be reserved");
+    };
+    let usage = QuotaUsage {
+      storage_bytes: 0,
+      charged_seats: 11,
+    };
+    assert_eq!(evaluate_workspace_quota(&grant, usage).overcapacity_member_count, 0);
+    assert!(matches!(
+      plan_seat_activation(
+        SeatActivationRequest {
+          authority: SeatAuthority::SelfActivation,
+          actor_is_target: true
+        },
+        SeatActivationFacts {
+          grant,
+          usage,
+          status: Some(status),
+          kind: Some(kind),
+          requested_role: Some(role),
+          collision: false,
+        },
+      ),
+      SeatOperationPlan::Mutate(SeatMutationIntent::Activate { .. })
+    ));
+  }
+
+  #[test]
   fn community_default_kid_rejects_privilege_escalation() {
     let now = parse_rfc3339("2026-11-22T00:00:00Z").unwrap();
     let base = LicenseClaimsV2 {
@@ -1012,7 +1086,7 @@ mod tests {
       }],
     );
     assert_eq!(expired_resolved.plan, Plan::SelfHostedFree);
-    assert_eq!(expired_resolved.limits.seat_limit, 10);
+    assert_eq!(expired_resolved.limits.seat_limit, i32::MAX);
     assert!(
       expired_resolved
         .diagnostics

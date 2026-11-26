@@ -21,6 +21,12 @@ const { notify, inviteMembers } = vi.hoisted(() => ({
   inviteMembers: vi.fn(),
 }));
 
+const quotaState = vi.hoisted(() => ({
+  memberCount: 1,
+  memberLimit: 3,
+  humanReadable: { name: 'Free', memberLimit: '3' },
+}));
+
 vi.mock('@toeverything/infra', () => {
   type Live = {
     value: unknown;
@@ -72,11 +78,7 @@ vi.mock('@toeverything/infra', () => {
           revalidate: vi.fn(),
           isRevalidating$: live(false),
           error$: live(null),
-          quota$: live({
-            memberCount: 1,
-            memberLimit: 3,
-            humanReadable: { name: 'Free', memberLimit: '3' },
-          }),
+          quota$: live(quotaState),
         },
       },
     ],
@@ -97,6 +99,7 @@ vi.mock('@affine/core/modules/permissions', () => ({
   WorkspacePermissionService: tokens.WorkspacePermissionService,
 }));
 vi.mock('@affine/core/modules/quota', () => ({
+  UNLIMITED_WORKSPACE_MEMBERS: 2_147_483_647,
   WorkspaceQuotaService: tokens.WorkspaceQuotaService,
 }));
 vi.mock('@affine/core/modules/share-setting', () => ({
@@ -136,7 +139,12 @@ vi.mock('@affine/component/member-components', () => ({
 }));
 
 vi.mock('@affine/component/setting-components', () => ({
-  SettingRow: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  SettingRow: ({ children, name }: { children: ReactNode; name: string }) => (
+    <div>
+      {name}
+      {children}
+    </div>
+  ),
 }));
 
 vi.mock('@affine/core/components/pure/file-upload', () => ({
@@ -159,6 +167,23 @@ describe('CloudWorkspaceMembersPanel invite', () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    quotaState.memberCount = 1;
+    quotaState.memberLimit = 3;
+  });
+
+  test('shows the member count and invites an eleventh member without a seat cap', async () => {
+    quotaState.memberCount = 10;
+    quotaState.memberLimit = 2_147_483_647;
+    inviteMembers.mockResolvedValue([]);
+    render(<CloudWorkspaceMembersPanel onChangeSettingState={vi.fn()} />);
+
+    expect(screen.getByText('Members (10)')).toBeTruthy();
+    const button = screen.getByTestId('send-invites');
+    fireEvent.click(button);
+    expect(inviteMembers).toHaveBeenCalledWith(['member@example.com']);
+    await vi.waitFor(() => {
+      expect(button.getAttribute('aria-busy')).toBe('false');
+    });
   });
 
   test.each([

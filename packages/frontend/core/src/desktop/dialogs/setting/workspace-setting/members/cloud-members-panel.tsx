@@ -16,7 +16,10 @@ import {
   WorkspaceMembersService,
   WorkspacePermissionService,
 } from '@affine/core/modules/permissions';
-import { WorkspaceQuotaService } from '@affine/core/modules/quota';
+import {
+  UNLIMITED_WORKSPACE_MEMBERS,
+  WorkspaceQuotaService,
+} from '@affine/core/modules/quota';
 import { WorkspaceShareSettingService } from '@affine/core/modules/share-setting';
 import { copyTextToClipboard } from '@affine/core/utils/clipboard';
 import { emailRegex } from '@affine/core/utils/email-regex';
@@ -98,6 +101,8 @@ export const CloudWorkspaceMembersPanel = ({
   const isLoading = useLiveData(workspaceQuotaService.quota.isRevalidating$);
   const error = useLiveData(workspaceQuotaService.quota.error$);
   const workspaceQuota = useLiveData(workspaceQuotaService.quota.quota$);
+  const unlimitedMembers =
+    workspaceQuota?.memberLimit === UNLIMITED_WORKSPACE_MEMBERS;
   const subscriptionService = useService(SubscriptionService);
   const plan = useLiveData(
     subscriptionService.subscription.pro$.map(s => s?.plan)
@@ -204,6 +209,7 @@ export const CloudWorkspaceMembersPanel = ({
       const uniqueEmails = deduplicateEmails(emails);
       if (
         !isTeam &&
+        !unlimitedMembers &&
         workspaceQuota &&
         uniqueEmails.length >
           workspaceQuota.memberLimit - workspaceQuota.memberCount
@@ -235,7 +241,14 @@ export const CloudWorkspaceMembersPanel = ({
         setIsMutating(false);
       }
     },
-    [isTeam, membersService, t, workspaceQuota, workspaceQuotaService.quota]
+    [
+      isTeam,
+      membersService,
+      t,
+      unlimitedMembers,
+      workspaceQuota,
+      workspaceQuotaService.quota,
+    ]
   );
 
   const onImportCSV = useAsyncCallback(
@@ -261,7 +274,7 @@ export const CloudWorkspaceMembersPanel = ({
   const desc = useMemo(() => {
     if (!workspaceQuota) return null;
 
-    if (isTeam) {
+    if (isTeam || unlimitedMembers) {
       return <span>{t['com.affine.payment.member.team.description']()}</span>;
     }
     return (
@@ -285,15 +298,22 @@ export const CloudWorkspaceMembersPanel = ({
     isOwner,
     isTeam,
     t,
+    unlimitedMembers,
     workspaceQuota,
   ]);
 
   const title = useMemo(() => {
-    if (isTeam) {
+    if (isTeam || unlimitedMembers) {
       return `${t['Members']()} (${workspaceQuota?.memberCount})`;
     }
     return `${t['Members']()} (${workspaceQuota?.memberCount}/${workspaceQuota?.memberLimit})`;
-  }, [isTeam, t, workspaceQuota?.memberCount, workspaceQuota?.memberLimit]);
+  }, [
+    isTeam,
+    t,
+    unlimitedMembers,
+    workspaceQuota?.memberCount,
+    workspaceQuota?.memberLimit,
+  ]);
 
   if (workspaceQuota === null) {
     if (isLoading) {
@@ -309,7 +329,7 @@ export const CloudWorkspaceMembersPanel = ({
         {isOwnerOrAdmin ? (
           <>
             <Button onClick={openInviteModal}>{t['Invite Members']()}</Button>
-            {!isTeam ? (
+            {!isTeam && !unlimitedMembers ? (
               <MemberLimitModal
                 isFreePlan={!plan}
                 open={openMemberLimit}
